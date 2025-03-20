@@ -30,7 +30,7 @@ mccabe==0.7.0
     # via flake8
 mock==5.0.1
     # via xlcalculator
-numpy==1.24.2
+numpy>=1.20.3,<1.27.0
     # via
     #   numpy-financial
     #   pandas
@@ -45,7 +45,7 @@ packaging==23.0
     # via
     #   build
     #   pytest
-pandas==1.5.3
+pandas==2.0.0
     # via xlcalculator
 pip-tools==6.12.2
     # via xlcalculator
@@ -78,7 +78,7 @@ tomli==2.0.1
     #   pytest
 wheel==0.38.4
     # via pip-tools
-yearfrac==0.4.8
+yearfrac @ git+https://github.com/Andera-AI/yearfrac.git
     # via xlcalculator
 
 # The following packages are considered to be unsafe in a requirements file:
