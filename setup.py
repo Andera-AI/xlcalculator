@@ -88,7 +88,7 @@ setuptools.setup(
         'pandas',
         'openpyxl',
         'numpy-financial',
-        'yearfrac>=0.4.8',
+        'yearfrac @ git+https://github.com/Andera-AI/yearfrac.git',
         'mock',
         'scipy'
     ],
