@@ -84,13 +84,13 @@ setuptools.setup(
     ],
     install_requires=[
         'jsonpickle',
-        'numpy',
-        'pandas',
+        'numpy>=1.20.3,<1.27.0',
+        'pandas>=2.0.0',
         'openpyxl',
         'numpy-financial',
         'yearfrac @ git+https://github.com/Andera-AI/yearfrac.git',
         'mock',
-        'scipy'
+        'scipy>1.10.0'
     ],
     extras_require=dict(
         test=TESTS_REQUIRE,
