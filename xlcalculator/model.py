@@ -280,24 +280,32 @@ class ModelCompiler:
                 logging.error(message)
                 raise ValueError(message)
 
-    def build_ranges(self, default_sheet=None):
+    def build_ranges(self, default_sheet=None, sheet_max_rows=None):
         for formula in self.model.formulae:
             associated_cells = set()
             for range in self.model.formulae[formula].terms:
+                cur_sheet = None
                 if ":" in range:
                     if "!" not in range:
                         range = "{}!{}".format(default_sheet, range)
-                    self.model.ranges[range] = xltypes.XLRange(range, range)
-                    associated_cells.update([
-                        cell
-                        for row in self.model.ranges[range].cells
-                            for cell in row  # noqa: E131
-                    ])
+                    else:
+                        cur_sheet, _ = range.split("!") 
+                    # avoid creating the same range multiple times
+                    if range not in self.model.ranges:
+                        self.model.ranges[range] = xltypes.XLRange(range, range)
+                        associated_cells.update([
+                            cell
+                            for row in self.model.ranges[range].cells
+                                for cell in row  # noqa: E131
+                        ])
                 else:
                     associated_cells.add(range)
 
                 if range in self.model.ranges:
-                    for row in self.model.ranges[range].cells:
+                    for i, row in enumerate(self.model.ranges[range].cells):
+                        # unbounded ranges (e.g. A:A) will default to having MAX_ROWS (1048576) rows, so we need to limit the loop to the actual sheet no of rows
+                        if sheet_max_rows and cur_sheet in sheet_max_rows and i >= sheet_max_rows[cur_sheet]:
+                            break
                         for cell_address in row:
                             if cell_address not in self.model.cells.keys():
                                 self.model.cells[cell_address] = \
