@@ -83,11 +83,12 @@ class XLRange(XLType):
     cells: list = field(init=False, compare=True, hash=False, repr=False)
     sheet: str = field(init=False, default="Sheet1", repr=False)
     value: list = field(default=None, repr=True)
+    max_row: int = field(default=None, repr=True)
 
     def __post_init__(self):
         if self.name is None:
             self.name = self.address_str
-        self.sheet, self.cells = utils.resolve_ranges(self.address_str)
+        self.sheet, self.cells = utils.resolve_ranges(self.address_str, sheet_max_row=self.max_row)
 
     @property
     def address(self):

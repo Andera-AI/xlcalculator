@@ -27,7 +27,7 @@ def resolve_address(addr):
     return sheet, col, row
 
 
-def resolve_ranges(ranges, default_sheet='Sheet1'):
+def resolve_ranges(ranges, default_sheet='Sheet1', sheet_max_row=None):
     sheet = None
     range_cells = collections.defaultdict(set)
     for rng in ranges.split(','):
@@ -43,11 +43,11 @@ def resolve_ranges(ranges, default_sheet='Sheet1'):
             sheet = rng_sheet
         min_col, min_row, max_col, max_row = range_boundaries(rng)
 
-        # Unbound ranges (e.g., A:A) might not have these set!
+        # Unbound ranges (e.g., A:A) might not have these set! So use the max row of the sheet with data if available
         min_col = min_col or 1
         min_row = min_row or 1
         max_col = max_col or MAX_COL
-        max_row = max_row or MAX_ROW
+        max_row = max_row or sheet_max_row or MAX_ROW
 
         # Excel ranges are boundaries inclusive!
         for row_idx in range(min_row or 1, max_row + 1):

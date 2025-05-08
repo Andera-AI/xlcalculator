@@ -281,7 +281,18 @@ class ModelCompiler:
                 raise ValueError(message)
 
     def build_ranges(self, default_sheet=None, sheet_max_rows=None):
+        # avoid repetition of range building
+        built_ranges = set()
+        range_cells_cache = {}
+        processed_formulas = set()
+
         for formula in self.model.formulae:
+            # skip sheet formula that have already been processed
+            formula_key = "{}|{}".format(self.model.formulae[formula].sheet_name, self.model.formulae[formula].formula)
+            if formula_key in processed_formulas:
+                continue
+            processed_formulas.add(formula_key)
+
             associated_cells = set()
             for range in self.model.formulae[formula].terms:
                 cur_sheet = None
@@ -289,36 +300,45 @@ class ModelCompiler:
                     if "!" not in range:
                         range = "{}!{}".format(default_sheet, range)
                     else:
-                        cur_sheet, _ = range.split("!") 
+                        cur_sheet, _ = range.split("!")
                     # avoid creating the same range multiple times
                     if range not in self.model.ranges:
-                        self.model.ranges[range] = xltypes.XLRange(range, range)
-                        associated_cells.update([
+                        # limit the number of rows of full column ranges (e.g. A:A) to the max number of rows in the sheet with data
+                        sheet_max_row = None
+                        if sheet_max_rows and cur_sheet not in sheet_max_rows:
+                            # if sheet is not in workbook, empty the range
+                            sheet_max_row = 1
+                        elif sheet_max_rows and cur_sheet in sheet_max_rows:
+                            sheet_max_row = sheet_max_rows[cur_sheet]
+                        self.model.ranges[range] = xltypes.XLRange(range, range, max_row=sheet_max_row)
+                  
+                    if range not in range_cells_cache:
+                        range_cells_cache[range] = set(
                             cell
                             for row in self.model.ranges[range].cells
-                                for cell in row  # noqa: E131
-                        ])
+                            for cell in row
+                        )
+                    associated_cells.update(range_cells_cache[range])
                 else:
                     associated_cells.add(range)
 
-                if range in self.model.ranges:
-                    for i, row in enumerate(self.model.ranges[range].cells):
-                        # unbounded ranges (e.g. A:A) will default to having MAX_ROWS (1048576) rows, so we need to limit the loop to the actual sheet no of rows
-                        if sheet_max_rows and cur_sheet in sheet_max_rows and i >= sheet_max_rows[cur_sheet]:
-                            break
+                if range in self.model.ranges and range not in built_ranges:
+                    # only build the range once
+                    built_ranges.add(range)
+                    for row in self.model.ranges[range].cells:
                         for cell_address in row:
                             if cell_address not in self.model.cells.keys():
-                                self.model.cells[cell_address] = \
-                                    xltypes.XLCell(cell_address, '')
+                                self.model.cells[cell_address] = xltypes.XLCell(
+                                    cell_address, ""
+                                )
 
             if formula in self.model.cells:
-                self.model.cells[formula].formula.associated_cells = \
-                    associated_cells
+                self.model.cells[formula].formula.associated_cells = associated_cells
 
             if formula in self.model.defined_names:
-                self.model.defined_names[formula].formula.associated_cells = \
-                    associated_cells
-
+                self.model.defined_names[
+                    formula
+                ].formula.associated_cells = associated_cells
             self.model.formulae[formula].associated_cells = associated_cells
 
     @staticmethod
