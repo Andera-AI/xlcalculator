@@ -296,7 +296,11 @@ class ModelCompiler:
             associated_cells = set()
             for range in self.model.formulae[formula].terms:
                 cur_sheet = None
-                if ":" in range:
+                # originally, the library only checks for ":" to expand the cell range
+                # however, found cases where ":" is used in table column references (e.g. Table1[Column:Name]) which is not supposed to be expanded, throwing errors
+                # so we need to add a check to see if "[" and "]" are in the range, and if so, skip the expansion
+                # TODO: add support for table column references
+                if ":" in range and ("[" not in range and "]" not in range):
                     if "!" not in range:
                         range = "{}!{}".format(default_sheet, range)
                     else:
