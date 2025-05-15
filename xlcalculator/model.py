@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 
 from . import xltypes, reader, parser, tokenizer
-
+from .utils import resolve_table_ranges
 
 @dataclass
 class Model():
@@ -19,6 +19,8 @@ class Model():
         init=False, default_factory=dict, compare=True, hash=True, repr=True)
     defined_names: dict = field(
         init=False, default_factory=dict, compare=True, hash=True, repr=True)
+    tables: dict = field(
+        init=False, default_factory=dict, compare=True, hash=True, repr=True)   
 
     def set_cell_value(self, address, value):
         """Sets a new value for a specified cell."""
@@ -287,20 +289,36 @@ class ModelCompiler:
         processed_formulas = set()
 
         for formula in self.model.formulae:
-            # skip sheet formula that have already been processed
             formula_key = "{}|{}".format(self.model.formulae[formula].sheet_name, self.model.formulae[formula].formula)
-            if formula_key in processed_formulas:
+            # skip sheet formula that have already been processed
+            # SPECIAL CASE: #[This Row] which changes based on the location of the cell
+            if "[#This Row]" in formula_key:
+                pass
+            elif formula_key in processed_formulas:
                 continue
             processed_formulas.add(formula_key)
 
             associated_cells = set()
             for range in self.model.formulae[formula].terms:
                 cur_sheet = None
-                # originally, the library only checks for ":" to expand the cell range
-                # however, found cases where ":" is used in table column references (e.g. Table1[Column:Name]) which is not supposed to be expanded, throwing errors
-                # so we need to add a check to see if "[" and "]" are in the range, and if so, skip the expansion
-                # TODO: add support for table column references
-                if ":" in range and ("[" not in range and "]" not in range):
+                # so far we can assume that if "[" and "]" are in the range, it's a table reference. haven't found any other cases yet but subject to change
+                # since this only processes range tokens, hopefully only table references are the only ones that can contain "[" and "]"
+                if "[" in range and "]" in range:
+                    # resolve table references (called structured references) to get the associated cells
+                    try:
+                        table_range = resolve_table_ranges(range, self.model.tables, formula)
+                        if "[#This Row]" in range:
+                            range = range.replace("[#This Row]", formula)
+                        self.model.ranges[range] = xltypes.XLRange(table_range, table_range)
+                        print(f"Addr: {formula} Table range {range} resolved to {table_range}")
+                        associated_cells.update(
+                            cell
+                            for row in self.model.ranges[range].cells
+                            for cell in row
+                        )
+                    except Exception as e:
+                        print(f"Skipping range, error resolving table range {range}: {e} ")
+                elif ":" in range:
                     if "!" not in range:
                         range = "{}!{}".format(default_sheet, range)
                     else:
