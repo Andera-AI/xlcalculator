@@ -2,10 +2,16 @@ import collections
 import re
 from openpyxl.utils.cell import COORD_RE, SHEET_TITLE
 from openpyxl.utils.cell import range_boundaries, get_column_letter
+from enum import Enum
 
 MAX_COL = 18278
 MAX_ROW = 1048576
 
+class ItemSpecifier(str, Enum):
+    All = "All"
+    Headers = "Headers"
+    Data = "Data"
+    ThisRow = "This Row"
 
 def resolve_sheet(sheet_str):
     sheet_str = sheet_str.strip()
@@ -91,7 +97,6 @@ def resolve_table_ranges(ranges, tables: dict[str, any], cur_cell_addr: str | No
         end_col = _sanitize_table_column_name(end_col) if end_col else end_col
     except Exception as e:
         raise ValueError(f"Error sanitizing table column name: {e}")
-    # print("item_specifiers:", item_specifiers)
 
     table_range = _get_table_range(table_range_components["table"], start_col, end_col, item_specifiers, tables, cur_cell_addr)
     if not table_range:
@@ -101,7 +106,7 @@ def resolve_table_ranges(ranges, tables: dict[str, any], cur_cell_addr: str | No
 
 def _parse_table_range(term: str) -> dict:
     match = re.match(
-        r"""^(?:(?P<sheet>[^!\[\]]+)!){0,1}    # Optional 'Sheet!'
+        r"""^(?:(?P<sheet>[^!\[\]]+)!){0,1}   # Optional 'Sheet!'
             (?P<table>[^\[\]]+)               # Table name
             \[(?P<specifier>.*)\]$            # Everything inside outermost []
         """,
@@ -203,7 +208,7 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
     min_col, min_row, max_col, max_row = range_boundaries(table_range)
 
     # apply item specifiers, limiting the rows range
-    if "All" in item_specifiers or ("Headers" in item_specifiers and "Data" in item_specifiers):
+    if ItemSpecifier.All in item_specifiers or (ItemSpecifier.Headers in item_specifiers and ItemSpecifier.Data in item_specifiers):
         pass
     elif len(item_specifiers) == 0:
         # empty specifier means the data part of the table
@@ -211,13 +216,11 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
     else:
         for item_specifier in item_specifiers:
             match item_specifier:
-                case "Headers":
-                    # use the header row count to modify the end range 
+                case ItemSpecifier.Headers:
                     max_row = min_row + tables[table_name].header_row_count - 1
-                case "Data":
-                    # use the header row count to modify the start range
+                case ItemSpecifier.Data:
                     min_row = min_row + tables[table_name].header_row_count
-                case "This Row":
+                case ItemSpecifier.ThisRow:
                     # min_row = max_row = current row
                     if cur_cell_addr is None:
                         raise ValueError("Current cell address is not provider for This Row item specifier")
@@ -248,7 +251,6 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
     if end_col_index is None:
         raise ValueError(f"Column {end_col} not found in table {table_name}")
         
-    # merge the column ranges
     return f"{tables[table_name].sheet}!{get_column_letter(start_col_index)}{min_row}:{get_column_letter(end_col_index)}{max_row}"
 
 def _translate_table_name(table_name: str, tables: dict) -> str:

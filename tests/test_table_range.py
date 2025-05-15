@@ -19,6 +19,7 @@ class TableRangeTest(testing.XlCalculatorTestCase):
         )
         self.tables = {"MyTable": self.table}
 
+    # Column ranges
     def test_one_column_range(self):
         # Test resolving a single column reference
         result = resolve_table_ranges("MyTable[Col2]", self.tables)
@@ -31,3 +32,20 @@ class TableRangeTest(testing.XlCalculatorTestCase):
     def test_two_column_range(self):
         result = resolve_table_ranges("MyTable[[Col2]:[Col3]]", self.tables)
         self.assertEqual(result, "Sheet1!B2:C5")
+
+    # Item specifiers
+    def test_one_item_specifier(self):
+        result = resolve_table_ranges("MyTable[#Headers]", self.tables)
+        self.assertEqual(result, "Sheet1!A1:C1")
+
+    def test_two_item_specifiers(self):
+        result = resolve_table_ranges("MyTable[[#Headers],[#Data]]", self.tables)
+        self.assertEqual(result, "Sheet1!A1:C5")
+
+    def test_this_row_item_specifier(self):
+        result = resolve_table_ranges("MyTable[[#This Row],[Col1]]", self.tables, "Sheet!E2")
+        self.assertEqual(result, "Sheet1!A2:A2")
+
+    def test_item_specifiers_with_column_range(self):
+        result = resolve_table_ranges("MyTable[[#Headers],[Col1]:[Col3]]", self.tables)
+        self.assertEqual(result, "Sheet1!A1:C1")
