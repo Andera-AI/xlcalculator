@@ -7,11 +7,13 @@ from enum import Enum
 MAX_COL = 18278
 MAX_ROW = 1048576
 
+# Item specifiers in Microsoft Excel structured references
 class ItemSpecifier(str, Enum):
     All = "All"
     Headers = "Headers"
     Data = "Data"
     ThisRow = "This Row"
+    Totals = "Totals" # not supported by our code yet
 
 def resolve_sheet(sheet_str):
     sheet_str = sheet_str.strip()
@@ -73,6 +75,11 @@ def resolve_ranges(ranges, default_sheet='Sheet1', sheet_max_row=None):
     ]
 
 def resolve_table_ranges(ranges, tables: dict[str, any], cur_cell_addr: str | None = None):
+    """
+    Given a structured reference / table reference, return the cell range that it references in the format of "<sheet>!<range>"
+    Documentation on syntax rules: https://support.microsoft.com/en-au/office/using-structured-references-with-excel-tables-f5ed2452-2337-4f71-bed3-c8ae6d2b276e
+    Throws errors if there are any parsing issues or no table range is found
+    """
     try:
         table_range_components = _parse_table_range(ranges)
     except Exception as e:
@@ -105,6 +112,10 @@ def resolve_table_ranges(ranges, tables: dict[str, any], cur_cell_addr: str | No
 
 
 def _parse_table_range(term: str) -> dict:
+    """
+    Given a potential structured reference / table reference, return the sheet, table, and specifier (whatever is inside the outermost [])
+    Uses regex to parse the term
+    """
     match = re.match(
         r"""^(?:(?P<sheet>[^!\[\]]+)!){0,1}   # Optional 'Sheet!'
             (?P<table>[^\[\]]+)               # Table name
@@ -134,6 +145,11 @@ def _parse_table_range(term: str) -> dict:
     }
 
 def _extract_table_specifiers(table_specifier: str) -> list[str]:
+    """
+    Given the main table specifier, return a list of specifiers.
+    The main table specifier pattern is a list of [] separated by commas, 
+    unless there is only 1 specifer, of which there might not be any []
+    """
     parts = []
     depth = 0
     current = []
@@ -162,7 +178,10 @@ def _extract_table_specifiers(table_specifier: str) -> list[str]:
     return parts
 
 def _parse_specifier(specifier: str, item_specifiers: list[str]) -> tuple[str, str]:
-    # empty specifier
+    """
+    A specifier can be a 1) item specifier, 2) a column range, or 3) a single column
+    """
+    # case 0: empty specifier
     if specifier == "":
         return None, None
     
@@ -175,9 +194,8 @@ def _parse_specifier(specifier: str, item_specifiers: list[str]) -> tuple[str, s
         item_specifiers.append(specifier[1:]) 
         return None, None
 
-    # case 2: range
-    # i think we can assume that the range is always split by "]:[", with no space in between
-    # it seems that excel does not support space in between the range, but can be wrong
+    # case 2: columnrange
+    # we can assume from experiments that the range is always split by "]:[", with no space in between from excel
     if "]:[" in specifier:
         start_col, end_col = specifier.split("]:[")
         start_col = start_col
@@ -188,6 +206,9 @@ def _parse_specifier(specifier: str, item_specifiers: list[str]) -> tuple[str, s
     return specifier, specifier
 
 def _sanitize_table_column_name(column_name: str) -> str:
+    """
+    Remove escape characters ' from the column name
+    """
     special_chars = ['[', ']', "'", '#', '@']
     new_column_name = ""
     for i in range(0, len(column_name)):
@@ -199,6 +220,9 @@ def _sanitize_table_column_name(column_name: str) -> str:
 
 def _get_table_range(table_name: str, start_col: str | None, end_col: str | None, 
                     item_specifiers: list[str], tables: dict, cur_cell_addr: str | None = None) -> str | None:
+    """
+    Given a dictionary of tables, translate the start column, end column, and item specifiers to return the table cell range in the format of "<sheet>!<range>"
+    """
     table_name = _translate_table_name(table_name, tables)
     if end_col is None:
         end_col = start_col
@@ -255,7 +279,7 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
 
 def _translate_table_name(table_name: str, tables: dict) -> str:
     """
-    Since we're appending _<sheet_name> to the table name in the construction of the table, while the excel formula still retains the original table name,
+    Since we're appending _<sheet_name> to the table name in the upload code, and while the excel formula still retains the original table name,
     we need to find the table name that matches the original table name.
     """
     if table_name in tables:

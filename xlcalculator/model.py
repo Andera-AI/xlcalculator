@@ -283,6 +283,16 @@ class ModelCompiler:
                 raise ValueError(message)
 
     def build_ranges(self, default_sheet=None, sheet_max_rows=None):
+        def _get_sheet_max_row(sheet_name):
+            if sheet_name is None:
+                return None
+            # if sheet is not in workbook, empty the range
+            elif sheet_max_rows and sheet_name not in sheet_max_rows:
+                return 1
+            elif sheet_max_rows and sheet_name in sheet_max_rows:
+                return sheet_max_rows[sheet_name]
+            return None
+
         # avoid repetition of range building
         built_ranges = set()
         range_cells_cache = {}
@@ -301,23 +311,30 @@ class ModelCompiler:
             associated_cells = set()
             for range in self.model.formulae[formula].terms:
                 cur_sheet = None
-                # so far we can assume that if "[" and "]" are in the range, it's a table reference. haven't found any other cases yet but subject to change
-                # since this only processes range tokens, hopefully only table references are the only ones that can contain "[" and "]"
+                # so far we can assume that if "[" and "]" are in the range, it is a table reference. haven't found any other cases yet, but subject to change
+                # since terms are only range tokens, it is very likely that only table references are the only ones that can contain "[" and "]"
                 if "[" in range and "]" in range:
                     # resolve table references (called structured references) to get the associated cells
                     try:
                         table_range = resolve_table_ranges(range, self.model.tables, formula)
+                        # replace "[#This Row]" with the current cell address to ensure unique range
                         if "[#This Row]" in range:
                             range = range.replace("[#This Row]", formula)
-                        self.model.ranges[range] = xltypes.XLRange(table_range, table_range)
-                        print(f"Addr: {formula} Table range {range} resolved to {table_range}")
-                        associated_cells.update(
-                            cell
-                            for row in self.model.ranges[range].cells
-                            for cell in row
-                        )
+                        if "!" in table_range:
+                            cur_sheet, _ = table_range.split("!")
+                        self.model.ranges[range] = xltypes.XLRange(table_range, table_range, max_row=_get_sheet_max_row(cur_sheet))
+                        # print(f"Addr: {formula} Table range {range} resolved to {table_range}")
+                        if range not in range_cells_cache:
+                            range_cells_cache[range] = set(
+                                cell
+                                for row in self.model.ranges[range].cells
+                                for cell in row
+                            )
+                        associated_cells.update(range_cells_cache[range])
                     except Exception as e:
                         print(f"Skipping range, error resolving table range {range}: {e} ")
+
+                # normal cell range
                 elif ":" in range:
                     if "!" not in range:
                         range = "{}!{}".format(default_sheet, range)
@@ -326,13 +343,7 @@ class ModelCompiler:
                     # avoid creating the same range multiple times
                     if range not in self.model.ranges:
                         # limit the number of rows of full column ranges (e.g. A:A) to the max number of rows in the sheet with data
-                        sheet_max_row = None
-                        if sheet_max_rows and cur_sheet not in sheet_max_rows:
-                            # if sheet is not in workbook, empty the range
-                            sheet_max_row = 1
-                        elif sheet_max_rows and cur_sheet in sheet_max_rows:
-                            sheet_max_row = sheet_max_rows[cur_sheet]
-                        self.model.ranges[range] = xltypes.XLRange(range, range, max_row=sheet_max_row)
+                        self.model.ranges[range] = xltypes.XLRange(range, range, max_row=_get_sheet_max_row(cur_sheet))
                   
                     if range not in range_cells_cache:
                         range_cells_cache[range] = set(
@@ -341,9 +352,11 @@ class ModelCompiler:
                             for cell in row
                         )
                     associated_cells.update(range_cells_cache[range])
+
                 else:
                     associated_cells.add(range)
 
+                # make sure cells are created for all addresses in the range
                 if range in self.model.ranges and range not in built_ranges:
                     # only build the range once
                     built_ranges.add(range)

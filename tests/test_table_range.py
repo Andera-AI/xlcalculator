@@ -2,7 +2,7 @@ from . import testing
 from xlcalculator.utils import resolve_table_ranges
 from xlcalculator.xltypes import XLTable
 
-# Dummy column class for XLTable columns
+# Dummy column class for our ExcelTableColumn
 class DummyColumn:
     def __init__(self, name):
         self.name = name
@@ -61,6 +61,7 @@ class TableRangeTest(testing.XlCalculatorTestCase):
         self.assertEqual(result, "Sheet1!A1:C1")
 
     # Edge cases
+    # Big challenge is to parse the items correctly when it has special characters such as spaces, brackets, colons, etc.
     def test_with_spaces(self):
         result = resolve_table_ranges("MyTable[ [Col2] ]", self.tables)
         self.assertEqual(result, "Sheet1!B2:B5")
