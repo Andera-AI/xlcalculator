@@ -311,19 +311,19 @@ class ModelCompiler:
             associated_cells = set()
             for range in self.model.formulae[formula].terms:
                 cur_sheet = None
-                # so far we can assume that if "[" and "]" are in the range, it is a table reference. haven't found any other cases yet, but subject to change
-                # since terms are only range tokens, it is very likely that only table references are the only ones that can contain "[" and "]"
+                # From current research, there are only 2 cases where "[" and "]" are used in an excel formula: 1) external references, 2) table structured references
+                # https://medium.com/@excelprodigy/understanding-and-utilizing-brackets-in-excel-2e8b0ccd6f37
+                # external references are not supported for now
                 if "[" in range and "]" in range:
-                    # resolve table references (called structured references) to get the associated cells
+                    # resolve table references
                     try:
                         table_range = resolve_table_ranges(range, self.model.tables, formula)
-                        # replace "[#This Row]" with the current cell address to ensure unique range
+                        # ensure unique range
                         if "[#This Row]" in range:
                             range = range.replace("[#This Row]", formula)
                         if "!" in table_range:
                             cur_sheet, _ = table_range.split("!")
                         self.model.ranges[range] = xltypes.XLRange(table_range, table_range, max_row=_get_sheet_max_row(cur_sheet))
-                        # print(f"Addr: {formula} Table range {range} resolved to {table_range}")
                         if range not in range_cells_cache:
                             range_cells_cache[range] = set(
                                 cell
@@ -344,7 +344,6 @@ class ModelCompiler:
                     if range not in self.model.ranges:
                         # limit the number of rows of full column ranges (e.g. A:A) to the max number of rows in the sheet with data
                         self.model.ranges[range] = xltypes.XLRange(range, range, max_row=_get_sheet_max_row(cur_sheet))
-                  
                     if range not in range_cells_cache:
                         range_cells_cache[range] = set(
                             cell
