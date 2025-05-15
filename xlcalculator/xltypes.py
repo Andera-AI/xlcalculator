@@ -93,3 +93,12 @@ class XLRange(XLType):
     @property
     def address(self):
         return self.cells
+
+@dataclass
+class XLTable(XLType):
+    """Excel Table"""
+    name: str = field(default=None)
+    sheet: str = field(default="Sheet1")
+    cell_range: str = field(default=None)
+    columns: list = field(default=None)
+    header_row_count: int = field(default=None)
