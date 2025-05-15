@@ -65,3 +65,203 @@ def resolve_ranges(ranges, default_sheet='Sheet1', sheet_max_row=None):
         ]
         for row_idx, row_cells in sorted(range_cells.items())
     ]
+
+def resolve_table_ranges(ranges, tables: dict[str, any], cur_cell_addr: str | None = None):
+    try:
+        table_range_components = _parse_table_range(ranges)
+    except Exception as e:
+        raise ValueError(f"Error extracting table range components: {e}")
+
+    try:
+        table_specifier_components = _extract_table_specifiers(table_range_components["specifier"])
+    except Exception as e:
+        raise ValueError(f"Error extracting table specifier components: {e}")
+    
+    try:
+        item_specifiers = []
+        start_col = None
+        end_col = None
+        for table_specifier_component in table_specifier_components:
+            start_col, end_col = _parse_specifier(table_specifier_component, item_specifiers)
+    except Exception as e:
+        raise ValueError(f"Error parsing specifier: {e}")
+
+    try:
+        start_col = _sanitize_table_column_name(start_col) if start_col else start_col
+        end_col = _sanitize_table_column_name(end_col) if end_col else end_col
+    except Exception as e:
+        raise ValueError(f"Error sanitizing table column name: {e}")
+    # print("item_specifiers:", item_specifiers)
+
+    table_range = _get_table_range(table_range_components["table"], start_col, end_col, item_specifiers, tables, cur_cell_addr)
+    if not table_range:
+        raise ValueError("Unable to extract cell range of table range")
+    return table_range
+
+
+def _parse_table_range(term: str) -> dict:
+    match = re.match(
+        r"""^(?:(?P<sheet>[^!\[\]]+)!){0,1}    # Optional 'Sheet!'
+            (?P<table>[^\[\]]+)               # Table name
+            \[(?P<specifier>.*)\]$            # Everything inside outermost []
+        """,
+        term,
+        re.VERBOSE
+    )
+    if not match:
+        raise ValueError("Term doesn't follow structured reference pattern")
+    
+    specifier = match.group("specifier")
+    if specifier is None:
+        raise ValueError("Unable to extract specifier from term")
+    elif isinstance(specifier, str):
+        specifier = specifier.strip()
+
+    sheet = match.group("sheet")
+    table = match.group("table")
+    if table is None:
+        raise ValueError("Unable to extract table from term")
+
+    return {
+        "sheet": sheet,
+        "table": table,
+        "specifier": specifier,
+    }
+
+def _extract_table_specifiers(table_specifier: str) -> list[str]:
+    parts = []
+    depth = 0
+    current = []
+
+    for char in table_specifier:
+        if char == '[':
+            depth += 1
+        elif char == ']':
+            depth -= 1
+
+        if char == ',' and depth == 0:
+            part = ''.join(current).strip()
+            if part.startswith('[') and part.endswith(']'):
+                parts.append(part)
+            current = []
+        else:
+            current.append(char)
+
+    # Add last part
+    part = ''.join(current).strip()
+    if part.startswith('[') and part.endswith(']'):
+        parts.append(part)
+
+    if len(parts) == 0:
+        return [table_specifier]
+    return parts
+
+def _parse_specifier(specifier: str, item_specifiers: list[str]) -> tuple[str, str]:
+    # empty specifier
+    if specifier == "":
+        return None, None
+    
+    # strip []
+    if specifier.startswith("[") and specifier.endswith("]"):
+        specifier = specifier[1:-1]
+
+    # case 1: item specifier
+    if specifier[0] == "#":
+        item_specifiers.append(specifier[1:]) 
+        return None, None
+
+    # case 2: range
+    # i think we can assume that the range is always split by "]:[", with no space in between
+    # it seems that excel does not support space in between the range, but can be wrong
+    if "]:[" in specifier:
+        start_col, end_col = specifier.split("]:[")
+        start_col = start_col
+        end_col = end_col
+        return start_col, end_col
+    
+    # case 3: single column
+    return specifier, specifier
+
+def _sanitize_table_column_name(column_name: str) -> str:
+    special_chars = ['[', ']', "'", '#', '@']
+    new_column_name = ""
+    for i in range(0, len(column_name)):
+        if column_name[i] == "'":
+            if i < len(column_name) - 1 and column_name[i+1] in special_chars:
+                continue
+        new_column_name += column_name[i]
+    return new_column_name
+
+def _get_table_range(table_name: str, start_col: str | None, end_col: str | None, 
+                    item_specifiers: list[str], tables: dict, cur_cell_addr: str | None = None) -> str | None:
+    table_name = _translate_table_name(table_name, tables)
+    if end_col is None:
+        end_col = start_col
+
+    # get table column range
+    table_range = tables[table_name].cell_range
+    min_col, min_row, max_col, max_row = range_boundaries(table_range)
+
+    # apply item specifiers, limiting the rows range
+    if "All" in item_specifiers or ("Headers" in item_specifiers and "Data" in item_specifiers):
+        pass
+    elif len(item_specifiers) == 0:
+        # empty specifier means the data part of the table
+        min_row = min_row + tables[table_name].header_row_count
+    else:
+        for item_specifier in item_specifiers:
+            match item_specifier:
+                case "Headers":
+                    # use the header row count to modify the end range 
+                    max_row = min_row + tables[table_name].header_row_count - 1
+                case "Data":
+                    # use the header row count to modify the start range
+                    min_row = min_row + tables[table_name].header_row_count
+                case "This Row":
+                    # min_row = max_row = current row
+                    if cur_cell_addr is None:
+                        raise ValueError("Current cell address is not provider for This Row item specifier")
+                    coor = cur_cell_addr.rsplit("!", 1)[-1]
+                    _, min_row, _, max_row = range_boundaries(coor)
+                case _:
+                    # todo cases: Totals
+                    raise ValueError(f"Item specifier not suppoerted yet: {item_specifier}")
+    
+    # special case: no column range specified, so span all columns
+    if start_col is None:
+        return f"{tables[table_name].sheet}!{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
+
+    # get column range indexes from column names, limiting column range
+    start_col_index = None
+    end_col_index = None
+    index = min_col
+    for column in tables[table_name].columns:
+        # assumption: column names are unique
+        if column.name == start_col:
+            start_col_index = index
+        if column.name == end_col:
+            end_col_index = index
+        index += 1
+
+    if start_col_index is None:
+        raise ValueError(f"Column {start_col} not found in table {table_name}")
+    if end_col_index is None:
+        raise ValueError(f"Column {end_col} not found in table {table_name}")
+        
+    # merge the column ranges
+    return f"{tables[table_name].sheet}!{get_column_letter(start_col_index)}{min_row}:{get_column_letter(end_col_index)}{max_row}"
+
+def _translate_table_name(table_name: str, tables: dict) -> str:
+    """
+    Since we're appending _<sheet_name> to the table name in the construction of the table, while the excel formula still retains the original table name,
+    we need to find the table name that matches the original table name.
+    """
+    if table_name in tables:
+        return table_name
+    else:
+        for name, table in tables.items():
+            if "_" in name:
+                original_table_name, potential_sheet = name.split("_", 1)
+                if original_table_name == table_name and table.sheet == potential_sheet:
+                    return name
+    raise ValueError(f"Unable to find table name {table_name} in list of tables")
