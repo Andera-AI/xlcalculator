@@ -9,15 +9,21 @@ class DummyColumn:
 
 class TableRangeTest(testing.XlCalculatorTestCase):
     def setUp(self):
-        # Create a dummy table with columns and a range
-        self.table = XLTable(
+        simple_table = XLTable(
             name="MyTable",
             sheet="Sheet1",
             cell_range="A1:C5",
             columns=[DummyColumn("Col1"), DummyColumn("Col2"), DummyColumn("Col3")],
             header_row_count=1
         )
-        self.tables = {"MyTable": self.table}
+        edge_case_table = XLTable(
+            name="EdgeCaseTable",
+            sheet="Sheet1",
+            cell_range="A1:C5",
+            columns=[DummyColumn("!Sales"), DummyColumn("[Brackets]"), DummyColumn("colon : bracket ][")],
+            header_row_count=1
+        )
+        self.tables = {"MyTable": simple_table, "EdgeCaseTable": edge_case_table}
 
     # Column ranges
     def test_one_column_range(self):
@@ -38,6 +44,10 @@ class TableRangeTest(testing.XlCalculatorTestCase):
         result = resolve_table_ranges("MyTable[#Headers]", self.tables)
         self.assertEqual(result, "Sheet1!A1:C1")
 
+    def test_all_item_specifier(self):
+        result = resolve_table_ranges("MyTable[#All]", self.tables)
+        self.assertEqual(result, "Sheet1!A1:C5")
+
     def test_two_item_specifiers(self):
         result = resolve_table_ranges("MyTable[[#Headers],[#Data]]", self.tables)
         self.assertEqual(result, "Sheet1!A1:C5")
@@ -49,3 +59,32 @@ class TableRangeTest(testing.XlCalculatorTestCase):
     def test_item_specifiers_with_column_range(self):
         result = resolve_table_ranges("MyTable[[#Headers],[Col1]:[Col3]]", self.tables)
         self.assertEqual(result, "Sheet1!A1:C1")
+
+    # Edge cases
+    def test_with_spaces(self):
+        result = resolve_table_ranges("MyTable[ [Col2] ]", self.tables)
+        self.assertEqual(result, "Sheet1!B2:B5")
+
+    def test_column_name_with_special_characters(self):
+        result = resolve_table_ranges("EdgeCaseTable['[Brackets']]", self.tables)
+        self.assertEqual(result, "Sheet1!B2:B5")
+
+        result = resolve_table_ranges("EdgeCaseTable[colon : bracket ']'[]", self.tables)
+        self.assertEqual(result, "Sheet1!C2:C5")
+
+    def test_column_range_with_special_characters(self):
+        result = resolve_table_ranges("EdgeCaseTable[['[Brackets']]:[colon : bracket ']'[]]", self.tables)
+        self.assertEqual(result, "Sheet1!B2:C5")
+
+    # Error cases
+    def test_not_a_table_range(self):
+        with self.assertRaises(ValueError):
+            resolve_table_ranges("SheetRefWithBracket[]!A2", self.tables)
+
+    def test_table_not_found(self):
+        with self.assertRaises(ValueError):
+            resolve_table_ranges("NonExistentTable[Col1]", self.tables)
+
+    def test_column_not_found(self):
+        with self.assertRaises(ValueError):
+            resolve_table_ranges("EdgeCaseTable[Col4]", self.tables)

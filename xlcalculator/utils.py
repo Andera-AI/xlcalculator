@@ -223,12 +223,12 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
                 case ItemSpecifier.ThisRow:
                     # min_row = max_row = current row
                     if cur_cell_addr is None:
-                        raise ValueError("Current cell address is not provider for This Row item specifier")
+                        raise ValueError("Current cell address is not provided for #This Row item specifier")
                     coor = cur_cell_addr.rsplit("!", 1)[-1]
                     _, min_row, _, max_row = range_boundaries(coor)
                 case _:
-                    # todo cases: Totals
-                    raise ValueError(f"Item specifier not suppoerted yet: {item_specifier}")
+                    # todo: Totals
+                    raise ValueError(f"Item specifier not supported yet: {item_specifier}")
     
     # special case: no column range specified, so span all columns
     if start_col is None:
