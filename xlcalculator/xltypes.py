@@ -102,3 +102,4 @@ class XLTable(XLType):
     cell_range: str = field(default=None)
     columns: list = field(default=None)
     header_row_count: int = field(default=None)
+    has_totals_row: bool = field(default=False)

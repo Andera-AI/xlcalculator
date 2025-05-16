@@ -21,9 +21,17 @@ class TableRangeTest(testing.XlCalculatorTestCase):
             sheet="Sheet1",
             cell_range="A1:C5",
             columns=[DummyColumn("!Sales"), DummyColumn("[Brackets]"), DummyColumn("colon : bracket ][")],
-            header_row_count=1
+            header_row_count=1,
         )
-        self.tables = {"MyTable": simple_table, "EdgeCaseTable": edge_case_table}
+        totals_table = XLTable(
+            name="TotalsTable",
+            sheet="Sheet1",
+            cell_range="A1:C5",
+            columns=[DummyColumn("Col1"), DummyColumn("Col2"), DummyColumn("Col3")],
+            header_row_count=2,
+            has_totals_row=True
+        )
+        self.tables = {"MyTable": simple_table, "EdgeCaseTable": edge_case_table, "TotalsTable": totals_table}
 
     # Column ranges
     def test_one_column_range(self):
@@ -48,9 +56,21 @@ class TableRangeTest(testing.XlCalculatorTestCase):
         result = resolve_table_ranges("MyTable[#All]", self.tables)
         self.assertEqual(result, "Sheet1!A1:C5")
 
+    def test_totals_item_specifier(self):
+        result = resolve_table_ranges("TotalsTable[#Totals]", self.tables)
+        self.assertEqual(result, "Sheet1!A5:C5")
+
+    def test_data_item_specifier(self):
+        result = resolve_table_ranges("TotalsTable[#Data]", self.tables, "Sheet1!A5")
+        self.assertEqual(result, "Sheet1!A3:C4")
+
     def test_two_item_specifiers(self):
         result = resolve_table_ranges("MyTable[[#Headers],[#Data]]", self.tables)
         self.assertEqual(result, "Sheet1!A1:C5")
+
+    def test_two_item_specifiers_with_totals(self):
+        result = resolve_table_ranges("TotalsTable[[#Data],[#Totals]]", self.tables)
+        self.assertEqual(result, "Sheet1!A3:C5")
 
     def test_this_row_item_specifier(self):
         result = resolve_table_ranges("MyTable[[#This Row],[Col1]]", self.tables, "Sheet!E2")
@@ -93,3 +113,16 @@ class TableRangeTest(testing.XlCalculatorTestCase):
     def test_column_not_found(self):
         with self.assertRaises(Exception):
             resolve_table_ranges("EdgeCaseTable[Col4]", self.tables)
+
+    def test_invalid_item_specifier(self):
+        with self.assertRaises(Exception):
+            resolve_table_ranges("TotalsTable[#Total]", self.tables)
+
+    def test_invalid_item_specifier_combination(self):
+        with self.assertRaises(Exception):
+            resolve_table_ranges("TotalsTable[[#Headers],[#Totals]]", self.tables)
+
+    def test_invalid_no_totals_row(self):
+        with self.assertRaises(Exception):
+            resolve_table_ranges("MyTable[#Totals]", self.tables)
+

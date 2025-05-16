@@ -279,27 +279,52 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
     min_col, min_row, max_col, max_row = range_boundaries(table_range)
 
     # Apply item specifiers, limiting the rows range
-    if ItemSpecifier.All in item_specifiers or (ItemSpecifier.Headers in item_specifiers and ItemSpecifier.Data in item_specifiers):
-        pass
-    elif len(item_specifiers) == 0:
+    if len(item_specifiers) == 0:
         # Empty specifier means the data part of the table
         min_row = min_row + tables[table_name].header_row_count
+        max_row = max_row - 1 if tables[table_name].has_totals_row else max_row
+    elif ItemSpecifier.All in item_specifiers:
+        pass
     else:
+        # Get the final bounds of the table range
+        # There are some specifiers that are mutually exclusive, so we need to check for that (e.g. This Row, Headers & Totals cannot be used together)
+        fixed_min_row = None
+        fixed_max_row = None
+        temp_min_row = max_row
+        temp_max_row = min_row
         for item_specifier in item_specifiers:
             match item_specifier:
                 case ItemSpecifier.Headers:
-                    max_row = min_row + tables[table_name].header_row_count - 1
+                    if fixed_max_row is not None:
+                        raise InvalidTableReferenceError("Headers specifier cannot be used together with Headers / This Row specifiers")
+                    fixed_min_row = min_row
+                    temp_max_row = max(temp_max_row, min_row + tables[table_name].header_row_count - 1)
                 case ItemSpecifier.Data:
-                    min_row = min_row + tables[table_name].header_row_count
+                    # Data: No Headers and Totals Rows
+                    temp_min_row = min(temp_min_row, min_row + tables[table_name].header_row_count)
+                    temp_max_row = max(temp_max_row, max_row - 1 if tables[table_name].has_totals_row else max_row)
                 case ItemSpecifier.ThisRow:
+                    # Current row only
                     if cur_cell_addr is None:
                         raise InvalidTableReferenceError("Current cell address is not provided for #This Row item specifier")
+                    if fixed_min_row is not None or fixed_max_row is not None:
+                        raise InvalidTableReferenceError("This Row specifier cannot be used together with other specifiers")
                     coor = cur_cell_addr.rsplit("!", 1)[-1]
-                    _, min_row, _, max_row = range_boundaries(coor)
+                    _, fixed_min_row, _, fixed_max_row = range_boundaries(coor)
+                    break
+                case ItemSpecifier.Totals:
+                    if not tables[table_name].has_totals_row:
+                        # Should return null ideally
+                        raise InvalidTableReferenceError("Table does not have a totals row")
+                    if fixed_min_row is not None:
+                        raise InvalidTableReferenceError("Totals specifier cannot be used together with Headers / This Row specifiers")
+                    fixed_max_row = max_row
+                    temp_min_row = min(temp_min_row, max_row)
                 case _:
-                    # TODO: Totals
-                    raise InvalidItemSpecifierError(f"Item specifier not supported yet: {item_specifier}")
-    
+                    raise InvalidItemSpecifierError(f"Item specifier not supported: {item_specifier}")
+        min_row = temp_min_row if fixed_min_row is None else fixed_min_row
+        max_row = temp_max_row if fixed_max_row is None else fixed_max_row
+
     # Special case: no column range specified, so span all columns
     if start_col is None:
         return f"{tables[table_name].sheet}!{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
@@ -308,11 +333,19 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
     start_col_index = None
     end_col_index = None
     index = min_col
+
+    column_name_count = {}
     for column in tables[table_name].columns:
-        # Assumption: column names are unique
-        if column.name == start_col:
+        # Append counter to column name if it's not unique
+        column_name = column.name
+        if column_name in column_name_count:
+            column_name_count[column_name] += 1
+            column_name = f"{column_name}_{column_name_count[column_name]}"
+        else:
+            column_name_count[column_name] = 1
+        if column_name == start_col:
             start_col_index = index
-        if column.name == end_col:
+        if column_name == end_col:
             end_col_index = index
         index += 1
 
