@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 
 from . import xltypes, reader, parser, tokenizer
-
+from .utils import resolve_table_ranges
 
 @dataclass
 class Model():
@@ -19,6 +19,8 @@ class Model():
         init=False, default_factory=dict, compare=True, hash=True, repr=True)
     defined_names: dict = field(
         init=False, default_factory=dict, compare=True, hash=True, repr=True)
+    tables: dict = field(
+        init=False, default_factory=dict, compare=True, hash=True, repr=True)   
 
     def set_cell_value(self, address, value):
         """Sets a new value for a specified cell."""
@@ -281,26 +283,59 @@ class ModelCompiler:
                 raise ValueError(message)
 
     def build_ranges(self, default_sheet=None, sheet_max_rows=None):
+        def _get_sheet_max_row(sheet_name):
+            if sheet_name is None:
+                return None
+            # if sheet is not in workbook, empty the range
+            elif sheet_max_rows and sheet_name not in sheet_max_rows:
+                return 1
+            elif sheet_max_rows and sheet_name in sheet_max_rows:
+                return sheet_max_rows[sheet_name]
+            return None
+
         # avoid repetition of range building
         built_ranges = set()
         range_cells_cache = {}
         processed_formulas = set()
 
         for formula in self.model.formulae:
-            # skip sheet formula that have already been processed
             formula_key = "{}|{}".format(self.model.formulae[formula].sheet_name, self.model.formulae[formula].formula)
-            if formula_key in processed_formulas:
+            # skip sheet formula that have already been processed
+            # SPECIAL CASE: #[This Row] which changes based on the location of the cell
+            if "[#This Row]" in formula_key:
+                pass
+            elif formula_key in processed_formulas:
                 continue
             processed_formulas.add(formula_key)
 
             associated_cells = set()
             for range in self.model.formulae[formula].terms:
                 cur_sheet = None
-                # originally, the library only checks for ":" to expand the cell range
-                # however, found cases where ":" is used in table column references (e.g. Table1[Column:Name]) which is not supposed to be expanded, throwing errors
-                # so we need to add a check to see if "[" and "]" are in the range, and if so, skip the expansion
-                # TODO: add support for table column references
-                if ":" in range and ("[" not in range and "]" not in range):
+                # From current research, there are only 2 cases where "[" and "]" are used in an excel formula: 1) external references, 2) table structured references
+                # https://medium.com/@excelprodigy/understanding-and-utilizing-brackets-in-excel-2e8b0ccd6f37
+                # external references are not supported for now
+                if "[" in range and "]" in range:
+                    # resolve table references
+                    try:
+                        table_range = resolve_table_ranges(range, self.model.tables, formula)
+                        # ensure unique range
+                        if "[#This Row]" in range:
+                            range = range.replace("[#This Row]", formula)
+                        if "!" in table_range:
+                            cur_sheet, _ = table_range.split("!")
+                        self.model.ranges[range] = xltypes.XLRange(table_range, table_range, max_row=_get_sheet_max_row(cur_sheet))
+                        if range not in range_cells_cache:
+                            range_cells_cache[range] = set(
+                                cell
+                                for row in self.model.ranges[range].cells
+                                for cell in row
+                            )
+                        associated_cells.update(range_cells_cache[range])
+                    except Exception as e:
+                        print(f"Skipping range, error resolving table range {range}: {e} ")
+
+                # normal cell range
+                elif ":" in range:
                     if "!" not in range:
                         range = "{}!{}".format(default_sheet, range)
                     else:
@@ -308,14 +343,7 @@ class ModelCompiler:
                     # avoid creating the same range multiple times
                     if range not in self.model.ranges:
                         # limit the number of rows of full column ranges (e.g. A:A) to the max number of rows in the sheet with data
-                        sheet_max_row = None
-                        if sheet_max_rows and cur_sheet not in sheet_max_rows:
-                            # if sheet is not in workbook, empty the range
-                            sheet_max_row = 1
-                        elif sheet_max_rows and cur_sheet in sheet_max_rows:
-                            sheet_max_row = sheet_max_rows[cur_sheet]
-                        self.model.ranges[range] = xltypes.XLRange(range, range, max_row=sheet_max_row)
-                  
+                        self.model.ranges[range] = xltypes.XLRange(range, range, max_row=_get_sheet_max_row(cur_sheet))
                     if range not in range_cells_cache:
                         range_cells_cache[range] = set(
                             cell
@@ -323,9 +351,11 @@ class ModelCompiler:
                             for cell in row
                         )
                     associated_cells.update(range_cells_cache[range])
+
                 else:
                     associated_cells.add(range)
 
+                # make sure cells are created for all addresses in the range
                 if range in self.model.ranges and range not in built_ranges:
                     # only build the range once
                     built_ranges.add(range)

@@ -37,7 +37,7 @@ class XLFormula(XLType):
                     and (token.tvalue not in self.terms)
             ):
                 # Make sure we have a full address.
-                term = token.tvalue
+                term = token.tvalue                    
                 if '!' not in term:
                     term = f'{self.sheet_name}!{term}'
                 self.terms.append(term)
@@ -83,7 +83,7 @@ class XLRange(XLType):
     cells: list = field(init=False, compare=True, hash=False, repr=False)
     sheet: str = field(init=False, default="Sheet1", repr=False)
     value: list = field(default=None, repr=True)
-    max_row: int = field(default=None, repr=True)
+    max_row: int | None = field(default=None, repr=True)
 
     def __post_init__(self):
         if self.name is None:
@@ -93,3 +93,13 @@ class XLRange(XLType):
     @property
     def address(self):
         return self.cells
+
+@dataclass
+class XLTable(XLType):
+    """Excel Table"""
+    name: str = field(default=None)
+    sheet: str = field(default="Sheet1")
+    cell_range: str = field(default=None)
+    columns: list = field(default=None)
+    header_row_count: int = field(default=None)
+    has_totals_row: bool = field(default=False)
