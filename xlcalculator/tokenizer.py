@@ -288,7 +288,11 @@ class ExcelParser(ExcelParserTokens):
         token = ""
         inString = False
         inPath = False
+
         inRange = False
+        openBrackets = 0
+        closeBrackets = 0
+
         inError = False
 
         while (len(formula) > 0):
@@ -344,7 +348,12 @@ class ExcelParser(ExcelParserTokens):
             # no embeds (changed to "()" by Excel)
             # end does not mark a token
             if inRange:
-                if currentChar() == "]":
+                # check if bracket is not escaped
+                if currentChar() == "[" and token[-1] != "'":
+                    openBrackets += 1
+                elif currentChar() == "]" and token[-1] != "'":
+                    closeBrackets += 1
+                if openBrackets == closeBrackets:
                     inRange = False
                 token += currentChar()
                 offset += 1
@@ -394,6 +403,7 @@ class ExcelParser(ExcelParserTokens):
                 continue
 
             if (currentChar() == "["):
+                openBrackets += 1
                 inRange = True
                 token += currentChar()
                 offset += 1

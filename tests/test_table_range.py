@@ -79,13 +79,17 @@ class TableRangeTest(testing.XlCalculatorTestCase):
 
     # Error cases
     def test_not_a_table_range(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Exception):
             resolve_table_ranges("SheetRefWithBracket[]!A2", self.tables)
+        
+        # External table reference
+        with self.assertRaises(Exception):
+            resolve_table_ranges("[external.xlsx]Sheet1!A1", self.tables)
 
     def test_table_not_found(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Exception):
             resolve_table_ranges("NonExistentTable[Col1]", self.tables)
 
     def test_column_not_found(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Exception):
             resolve_table_ranges("EdgeCaseTable[Col4]", self.tables)

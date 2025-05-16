@@ -30,11 +30,6 @@ class XLFormula(XLType):
     def __post_init__(self):
         """Supplimentary initialisation."""
         self.tokens = tokenizer.ExcelParser().getTokens(self.formula).items
-        
-        # Additional support: merge together separated multi comma table specifiers
-        reading_table_range = False
-        table_range_parts = []
-
         for token in self.tokens:
             if (
                     (token.ttype == ExcelParserTokens.TOK_TYPE_OPERAND)
@@ -42,27 +37,7 @@ class XLFormula(XLType):
                     and (token.tvalue not in self.terms)
             ):
                 # Make sure we have a full address.
-                term = token.tvalue
-
-                # combine together separated multi comma table specifiers
-                if not reading_table_range and term.count("[") == 2 and term.count("]") == 1:
-                    reading_table_range = True
-                    table_range_parts.append(term)
-                    continue
-                elif reading_table_range and term.count("[") == 1 and term.count("]") == 1:
-                    table_range_parts.append(term)
-                    continue
-                elif reading_table_range and term == "]":
-                    term = ",".join(table_range_parts)
-                    term += " ]"
-                    reading_table_range = False
-                    table_range_parts = []
-                elif reading_table_range and term.count("[") == 1 and term.count("]") == 2:
-                    table_range_parts.append(term)
-                    term = ",".join(table_range_parts)
-                    reading_table_range = False
-                    table_range_parts = []
-                    
+                term = token.tvalue                    
                 if '!' not in term:
                     term = f'{self.sheet_name}!{term}'
                 self.terms.append(term)
