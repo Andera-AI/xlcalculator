@@ -297,14 +297,14 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
                     coor = cur_cell_addr.rsplit("!", 1)[-1]
                     _, min_row, _, max_row = range_boundaries(coor)
                 case _:
-                    # todo: Totals
+                    # TODO: Totals
                     raise InvalidItemSpecifierError(f"Item specifier not supported yet: {item_specifier}")
     
     # Special case: no column range specified, so span all columns
     if start_col is None:
         return f"{tables[table_name].sheet}!{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
 
-    # get column range indexes from column names, limiting column range
+    # Get column range indexes from column names, limiting column range
     start_col_index = None
     end_col_index = None
     index = min_col
@@ -327,16 +327,6 @@ def _translate_table_name(table_name: str, tables: dict) -> str:
     """
     Since we're appending _<sheet_name> to the table name in the upload code, and while the excel formula still retains the original table name,
     we need to find the table name that matches the original table name.
-    
-    Args:
-        table_name: The original table name to look up
-        tables: Dictionary of available tables
-        
-    Returns:
-        str: The actual table name in the tables dictionary
-        
-    Raises:
-        TableNotFoundError: If the table name cannot be found
     """
     if table_name in tables:
         return table_name
