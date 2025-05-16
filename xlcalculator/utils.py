@@ -4,6 +4,26 @@ from openpyxl.utils.cell import COORD_RE, SHEET_TITLE
 from openpyxl.utils.cell import range_boundaries, get_column_letter
 from enum import Enum
 
+class TableReferenceError(Exception):
+    """Base class for table reference errors"""
+    pass
+
+class InvalidTableReferenceError(TableReferenceError):
+    """Raised when table reference syntax is invalid"""
+    pass
+
+class TableNotFoundError(TableReferenceError):
+    """Raised when referenced table doesn't exist"""
+    pass
+
+class ColumnNotFoundError(TableReferenceError):
+    """Raised when referenced column doesn't exist"""
+    pass
+
+class InvalidItemSpecifierError(TableReferenceError):
+    """Raised when an invalid item specifier is used"""
+    pass
+
 MAX_COL = 18278
 MAX_ROW = 1048576
 
@@ -78,43 +98,59 @@ def resolve_table_ranges(ranges, tables: dict[str, any], cur_cell_addr: str | No
     """
     Given a structured reference / table reference, return the cell range that it references in the format of "<sheet>!<range>"
     Documentation on syntax rules: https://support.microsoft.com/en-au/office/using-structured-references-with-excel-tables-f5ed2452-2337-4f71-bed3-c8ae6d2b276e
-    Throws errors if there are any parsing issues or no table range is found
+    
+    Args:
+        ranges: The table reference string (e.g., "Table1[Col1]")
+        tables: Dictionary of XLTable objects
+        cur_cell_addr: Current cell address for #This Row specifier
+        
+    Returns:
+        str: Cell range in format "<sheet>!<range>"
     """
     try:
+        # Parse the table reference
         table_range_components = _parse_table_range(ranges)
-    except Exception as e:
-        raise ValueError(f"Error extracting table range components: {e}")
-
-    try:
         table_specifier_components = _extract_table_specifiers(table_range_components["specifier"])
-    except Exception as e:
-        raise ValueError(f"Error extracting table specifier components: {e}")
-    
-    try:
+        
+        # Process specifiers
         item_specifiers = []
         start_col = None
         end_col = None
         for table_specifier_component in table_specifier_components:
             start_col, end_col = _parse_specifier(table_specifier_component, item_specifiers)
-    except Exception as e:
-        raise ValueError(f"Error parsing specifier: {e}")
-
-    try:
+            
+        # Sanitize column names
         start_col = _sanitize_table_column_name(start_col) if start_col else start_col
         end_col = _sanitize_table_column_name(end_col) if end_col else end_col
+        
+        # Get and validate table range
+        table_range = _get_table_range(
+            table_range_components["table"], 
+            start_col, 
+            end_col, 
+            item_specifiers, 
+            tables, 
+            cur_cell_addr
+        )
+        
+        if not table_range:
+            raise InvalidTableReferenceError("Unable to extract cell range of table range")
+            
+        return table_range
+        
     except Exception as e:
-        raise ValueError(f"Error sanitizing table column name: {e}")
-
-    table_range = _get_table_range(table_range_components["table"], start_col, end_col, item_specifiers, tables, cur_cell_addr)
-    if not table_range:
-        raise ValueError("Unable to extract cell range of table range")
-    return table_range
-
+        raise Exception(f"Error resolving table range: {e}")
 
 def _parse_table_range(term: str) -> dict:
     """
     Given a potential structured reference / table reference, return the sheet, table, and specifier (whatever is inside the outermost [])
     Uses regex to parse the term
+
+    Args:
+        term: The table reference string to parse
+        
+    Returns:
+        dict: Dictionary containing sheet, table, and specifier
     """
     match = re.match(
         r"""^(?:(?P<sheet>[^!\[\]]+)!){0,1}   # Optional 'Sheet!'
@@ -125,18 +161,18 @@ def _parse_table_range(term: str) -> dict:
         re.VERBOSE
     )
     if not match:
-        raise ValueError("Term doesn't follow structured reference pattern")
+        raise InvalidTableReferenceError("Term doesn't follow structured reference pattern")
     
     specifier = match.group("specifier")
     if specifier is None:
-        raise ValueError("Unable to extract specifier from term")
+        raise InvalidTableReferenceError("Unable to extract specifier from term")
     elif isinstance(specifier, str):
         specifier = specifier.strip()
 
     sheet = match.group("sheet")
     table = match.group("table")
     if table is None:
-        raise ValueError("Unable to extract table from term")
+        raise InvalidTableReferenceError("Unable to extract table from term")
 
     return {
         "sheet": sheet,
@@ -181,28 +217,28 @@ def _parse_specifier(specifier: str, item_specifiers: list[str]) -> tuple[str, s
     """
     A specifier can be a 1) item specifier, 2) a column range, or 3) a single column
     """
-    # case 0: empty specifier
+    # Case 0: empty specifier
     if specifier == "":
         return None, None
     
-    # strip []
+    # Strip []
     if specifier.startswith("[") and specifier.endswith("]"):
         specifier = specifier[1:-1]
 
-    # case 1: item specifier
+    # Case 1: item specifier
     if specifier[0] == "#":
         item_specifiers.append(specifier[1:]) 
         return None, None
 
-    # case 2: columnrange
-    # we can assume from experiments that the range is always split by "]:[", with no space in between from excel
+    # Case 2: columnrange
+    # We can assume from experiments that the range is always split by "]:[", with no space in between from excel
     if "]:[" in specifier:
         start_col, end_col = specifier.split("]:[")
         start_col = start_col
         end_col = end_col
         return start_col, end_col
     
-    # case 3: single column
+    # Case 3: single column
     return specifier, specifier
 
 def _sanitize_table_column_name(column_name: str) -> str:
@@ -222,20 +258,31 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
                     item_specifiers: list[str], tables: dict, cur_cell_addr: str | None = None) -> str | None:
     """
     Given a dictionary of tables, translate the start column, end column, and item specifiers to return the table cell range in the format of "<sheet>!<range>"
+    
+    Args:
+        table_name: Name of the table to get range for
+        start_col: Starting column name
+        end_col: Ending column name
+        item_specifiers: List of item specifiers (#Headers, #Data, etc.)
+        tables: Dictionary of available tables
+        cur_cell_addr: Current cell address for #This Row specifier
+        
+    Returns:
+        str: Cell range in format "<sheet>!<range>"
     """
     table_name = _translate_table_name(table_name, tables)
     if end_col is None:
         end_col = start_col
 
-    # get table column range
+    # Get table column range
     table_range = tables[table_name].cell_range
     min_col, min_row, max_col, max_row = range_boundaries(table_range)
 
-    # apply item specifiers, limiting the rows range
+    # Apply item specifiers, limiting the rows range
     if ItemSpecifier.All in item_specifiers or (ItemSpecifier.Headers in item_specifiers and ItemSpecifier.Data in item_specifiers):
         pass
     elif len(item_specifiers) == 0:
-        # empty specifier means the data part of the table
+        # Empty specifier means the data part of the table
         min_row = min_row + tables[table_name].header_row_count
     else:
         for item_specifier in item_specifiers:
@@ -245,16 +292,15 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
                 case ItemSpecifier.Data:
                     min_row = min_row + tables[table_name].header_row_count
                 case ItemSpecifier.ThisRow:
-                    # min_row = max_row = current row
                     if cur_cell_addr is None:
-                        raise ValueError("Current cell address is not provided for #This Row item specifier")
+                        raise InvalidTableReferenceError("Current cell address is not provided for #This Row item specifier")
                     coor = cur_cell_addr.rsplit("!", 1)[-1]
                     _, min_row, _, max_row = range_boundaries(coor)
                 case _:
                     # todo: Totals
-                    raise ValueError(f"Item specifier not supported yet: {item_specifier}")
+                    raise InvalidItemSpecifierError(f"Item specifier not supported yet: {item_specifier}")
     
-    # special case: no column range specified, so span all columns
+    # Special case: no column range specified, so span all columns
     if start_col is None:
         return f"{tables[table_name].sheet}!{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
 
@@ -263,7 +309,7 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
     end_col_index = None
     index = min_col
     for column in tables[table_name].columns:
-        # assumption: column names are unique
+        # Assumption: column names are unique
         if column.name == start_col:
             start_col_index = index
         if column.name == end_col:
@@ -271,9 +317,9 @@ def _get_table_range(table_name: str, start_col: str | None, end_col: str | None
         index += 1
 
     if start_col_index is None:
-        raise ValueError(f"Column {start_col} not found in table {table_name}")
+        raise ColumnNotFoundError(f"Column '{start_col}' not found in table '{table_name}'")
     if end_col_index is None:
-        raise ValueError(f"Column {end_col} not found in table {table_name}")
+        raise ColumnNotFoundError(f"Column '{end_col}' not found in table '{table_name}'")
         
     return f"{tables[table_name].sheet}!{get_column_letter(start_col_index)}{min_row}:{get_column_letter(end_col_index)}{max_row}"
 
@@ -281,6 +327,16 @@ def _translate_table_name(table_name: str, tables: dict) -> str:
     """
     Since we're appending _<sheet_name> to the table name in the upload code, and while the excel formula still retains the original table name,
     we need to find the table name that matches the original table name.
+    
+    Args:
+        table_name: The original table name to look up
+        tables: Dictionary of available tables
+        
+    Returns:
+        str: The actual table name in the tables dictionary
+        
+    Raises:
+        TableNotFoundError: If the table name cannot be found
     """
     if table_name in tables:
         return table_name
@@ -290,4 +346,4 @@ def _translate_table_name(table_name: str, tables: dict) -> str:
                 original_table_name, potential_sheet = name.split("_", 1)
                 if original_table_name == table_name and table.sheet == potential_sheet:
                     return name
-    raise ValueError(f"Unable to find table name {table_name} in list of tables")
+    raise TableNotFoundError(f"Table '{table_name}' not found. Available tables: {list(tables.keys())}")
