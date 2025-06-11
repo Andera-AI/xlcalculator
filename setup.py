@@ -1,4 +1,5 @@
 import os
+
 import setuptools
 
 
@@ -80,7 +81,7 @@ setuptools.setup(
     ],
     install_requires=[
         "jsonpickle",
-        "numpy>=1.20.3,<1.27.0",
+        "numpy>=1.20.3",
         "pandas>=2.0.0",
         "openpyxl",
         "numpy-financial",
